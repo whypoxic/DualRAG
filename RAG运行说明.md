@@ -14,6 +14,8 @@ RAG/
 ├── deepseek_API.py        # DeepSeek 调用接口
 ├── Qwen_API.py            # 本地 Qwen 调用接口
 ├── prompt_template.py     # LLM 共用 Prompt 模板
+├── logger_setup.py        # 日志初始化模块
+├── 日志说明.md             # 日志模块说明文档
 ├── retrieve.py            # 混合检索模块（采用FAISS + BM25 + rerank）
 ├── rag_demo.py            # RAG 主程序
 ├── download_bge_model.py  # 向量模型下载脚本
@@ -23,7 +25,9 @@ RAG/
 │   ├── vectors.faiss      # FAISS 向量索引
 │   └── chunks.pkl         # 块文本和源信息
 ├── bge-small-zh/          # 本地向量模型目录
+├── log/                   # 运行日志目录
 ├── qwen_local/            # 本地 Qwen 模型目录
+├── RAG环境搭建.md         # 环境搭建说明文档
 └── RAG运行说明.md         # 本文档
 ```
 
@@ -129,6 +133,15 @@ RAG/
   - `True`：仅显示模型回答。
   - `False`：显示检索详情 + 模型回答。
 
+### 日志参数
+
+- `LOG_DIR`：日志目录（默认 `./log`）。
+- `LOG_LEVEL`：日志级别（DEBUG / INFO / WARNING / ERROR）。
+- `LOG_TO_CONSOLE`：是否同时输出到控制台。
+- `LOG_MAX_BYTES`：单个日志文件最大体积。
+- `LOG_BACKUP_COUNT`：日志轮转保留数量。
+- `LOG_QUERY_PREVIEW_CHARS`：查询预览最大字符数。
+
 ### Prompt 工程参数（模型共享）
 
 Prompt 不在 `config.py`，统一放在 `prompt_template.py`：
@@ -152,6 +165,12 @@ Prompt 不在 `config.py`，统一放在 `prompt_template.py`：
 - 程序结构：按“分块、路径、检索、LLM、输出”分组定义全局参数。
 - 核心作用：统一控制系统行为，避免参数分散在各脚本中。
 - 被调用关系：由 `rag_demo.py`、`build_vector_index.py`、`retrieve.py`、`deepseek_API.py`、`Qwen_API.py` 统一读取。
+
+### logger_setup.py
+
+- 程序结构：提供 `get_logger(name, log_file)` 统一初始化日志器。
+- 核心作用：自动创建 `log/` 目录，配置文件日志轮转与可选控制台输出。
+- 调用关系：被 `rag_demo.py`、`build_vector_index.py`、`retrieve.py`、`deepseek_API.py`、`Qwen_API.py` 导入使用。
 
 ### chunker.py
 
@@ -186,6 +205,7 @@ Prompt 不在 `config.py`，统一放在 `prompt_template.py`：
    - 按 `LLM_PROVIDER` 分流调用 `deepseek_API.py` 或 `Qwen_API.py`。
    - 处理输入输出，实现问答体系。
 - 调用关系：是 **系统主入口** ，统一串联所有模块。
+- 日志说明：运行该脚本时会自动初始化日志模块并写入 `log/`，无需单独启动日志程序。
 
 ### deepseek_API.py
 

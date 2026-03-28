@@ -36,6 +36,7 @@ qwen_local/
 indexes/
 *.faiss
 *.pkl
+log/
 
 # -----------------------------
 # Local backup / sensitive notes

@@ -50,3 +50,11 @@ QWEN_REPETITION_PENALTY = 1.05
 
 # ===== 输出配置 =====
 SHOW_BEST_ONLY = True  # 是否仅显示AI模型输出结果
+
+# ===== 日志配置 =====
+LOG_DIR = "./log"              # 日志目录
+LOG_LEVEL = "INFO"             # 日志级别：DEBUG/INFO/WARNING/ERROR
+LOG_TO_CONSOLE = False          # 是否同时输出到控制台（False=仅写入log文件）
+LOG_MAX_BYTES = 2 * 1024 * 1024 # 单个日志文件最大体积（2MB）
+LOG_BACKUP_COUNT = 3            # 日志轮转保留数量
+LOG_QUERY_PREVIEW_CHARS = 80    # 查询预览最大字符数（防止日志过长）

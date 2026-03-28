@@ -6,6 +6,7 @@ deepseek_API.py
 """
 
 from typing import List, Optional
+import time
 
 from openai import OpenAI
 
@@ -17,6 +18,10 @@ from config import (
 )
 # 从 prompt_template 导入系统提示和用户提示构建函数
 from prompt_template import SYSTEM_PROMPT, build_user_prompt
+from logger_setup import get_logger
+
+
+logger = get_logger("llm.deepseek", "llm.log")
 
 
 def generate_with_openai_compatible(
@@ -34,8 +39,10 @@ def generate_with_openai_compatible(
     """
 
     if not api_key.strip():
+        logger.warning("OpenAI兼容调用失败: API Key为空")
         return None
 
+    start = time.perf_counter()
     client = OpenAI(
         api_key=api_key,
         base_url=base_url,
@@ -56,6 +63,12 @@ def generate_with_openai_compatible(
         ],
         stream=False,
     )
+    logger.info(
+        "OpenAI兼容调用成功: model=%s, contexts=%d, elapsed_ms=%.2f",
+        model,
+        len(contexts),
+        (time.perf_counter() - start) * 1000,
+    )
     return response.choices[0].message.content.strip()
 
 
@@ -64,11 +77,13 @@ def generate_with_deepseek(query: str, contexts: List[str]) -> Optional[str]:
     DeepSeek 专用适配器，对外暴露稳定函数名。
     """
     if not DEEPSEEK_API_KEY.strip():
+        logger.warning("DeepSeek调用跳过: API Key未配置")
         print("\nDeepSeek API Key 未配置，跳过生成回答。")
         print("请在 config.py 中填写 DEEPSEEK_API_KEY。")
         return None
 
     try:
+        logger.info("开始DeepSeek调用: model=%s, query_len=%d, contexts=%d", LLM_MODEL_NAME, len(query), len(contexts))
         return generate_with_openai_compatible(
             query=query,
             contexts=contexts,
@@ -78,5 +93,6 @@ def generate_with_deepseek(query: str, contexts: List[str]) -> Optional[str]:
             timeout=DEEPSEEK_TIMEOUT,
         )
     except Exception as e:
+        logger.exception("DeepSeek调用失败")
         print(f"\nDeepSeek 调用失败: {e}")
         return None

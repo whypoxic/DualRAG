@@ -36,8 +36,10 @@
 - [deepseek_API.py](deepseek_API.py)：DeepSeek 调用
 - [Qwen_API.py](Qwen_API.py)：本地 Qwen 调用
 - [prompt_template.py](prompt_template.py)：共享 Prompt 
+- [logger_setup.py](logger_setup.py)：统一日志初始化
 - [docs.txt](docs.txt)：知识库
 - [indexes/](indexes/)：索引目录
+- [log/](log/)：运行日志目录
 - [bge-small-zh/](bge-small-zh/)：向量模型目录
 - [qwen_local/](qwen_local/)：本地 Qwen 模型目录
 
@@ -139,4 +141,12 @@ python rag_demo.py
 
 - 修改 [prompt_template.py](prompt_template.py)
 - DeepSeek 与 Qwen 会同步使用新 Prompt
+
+## 日志模块
+
+- 日志统一通过 [logger_setup.py](logger_setup.py) 初始化，默认写入 [log/](log/)。
+- 运行主程序 [rag_demo.py](rag_demo.py) 时，会自动记录主流程、检索与模型调用日志。
+- 运行索引构建 [build_vector_index.py](build_vector_index.py) 时，会自动记录构建阶段日志。
+- 日志模块不需要单独启动；业务脚本运行时会自动生效。
+- 详细说明可查看 [日志说明.md](日志说明.md)。
 

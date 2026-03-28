@@ -6,9 +6,14 @@ retrieve.py
 from collections import Counter
 import math
 import re
+import time
 from typing import Dict, List
 
 import numpy as np
+from logger_setup import get_logger
+
+
+logger = get_logger("retrieve", "retrieve.log")
 
 
 def tokenize_mixed(text: str) -> List[str]:
@@ -112,8 +117,10 @@ def hybrid_retrieve(
     """
 
     if not chunk_texts:
+        logger.warning("chunk_texts为空，跳过检索")
         return []
 
+    start = time.perf_counter()
     query_vec = np.asarray(model.encode([query]), dtype=np.float32)
 
     # ===== 1) FAISS 候选 =====
@@ -170,7 +177,17 @@ def hybrid_retrieve(
     reranked.sort(key=lambda x: x["rerank_score"], reverse=True)
 
     final_k = min(top_k, rerank_top_k, len(reranked))
-    return reranked[:final_k]
+    results = reranked[:final_k]
+    logger.info(
+        "hybrid_retrieve完成: query_len=%d, faiss_candidates=%d, bm25_candidates=%d, hybrid_candidates=%d, final=%d, elapsed_ms=%.2f",
+        len(query),
+        kf,
+        kb,
+        len(candidate_ids),
+        len(results),
+        (time.perf_counter() - start) * 1000,
+    )
+    return results
 
 
 def split_query(query: str) -> List[str]:
@@ -209,7 +226,9 @@ def hybrid_retrieve_with_query_split(
     3) 合并所有结果、去重、按 rerank_score 重排序
     """
     
+    start = time.perf_counter()
     sub_queries = split_query(query)
+    logger.info("query拆分完成: query_len=%d, sub_queries=%d", len(query), len(sub_queries))
     
     if not sub_queries:
         return []
@@ -256,4 +275,12 @@ def hybrid_retrieve_with_query_split(
     num_sub_queries = len(sub_queries)
     max_results = num_sub_queries * rerank_top_k
     final_k = min(max_results, len(merged_results))
-    return merged_results[:final_k]
+    results = merged_results[:final_k]
+    logger.info(
+        "split检索完成: sub_queries=%d, merged=%d, final=%d, elapsed_ms=%.2f",
+        len(sub_queries),
+        len(merged_results),
+        len(results),
+        (time.perf_counter() - start) * 1000,
+    )
+    return results

@@ -2,6 +2,8 @@
 
 import os
 import pickle
+import time
+import uuid
 import torch
 import faiss
 import numpy as np
@@ -24,12 +26,17 @@ from config import (
 	BM25_SCORE_WEIGHT,
 	LLM_PROVIDER,
 	QWEN_MODEL_NAME,
+	LOG_QUERY_PREVIEW_CHARS,
 )
 
 # 调用以下模块：
 from deepseek_API import generate_with_deepseek # LLM生成接口
 from Qwen_API import generate_with_qwen, preload_qwen_model # 本地Qwen生成接口
 from retrieve import BM25Retriever, hybrid_retrieve_with_query_split # 检索模块
+from logger_setup import get_logger
+
+
+logger = get_logger("rag_demo", "rag_demo.log")
 
 
 def load_index_and_chunks():
@@ -41,6 +48,7 @@ def load_index_and_chunks():
 	"""
 	# 检查索引文件是否存在
 	if not os.path.exists(INDEX_FILE) or not os.path.exists(CHUNKS_FILE):
+		logger.error("缺少索引文件: index_exists=%s, chunks_exists=%s", os.path.exists(INDEX_FILE), os.path.exists(CHUNKS_FILE))
 		print(f"   error:缺少索引文件")
 		print(f"   请先运行: python build_vector_index.py")
 		print(f"   缺失文件:")
@@ -52,21 +60,29 @@ def load_index_and_chunks():
 	
 	# 加载 FAISS 索引
 	try:
+		start = time.perf_counter()
 		index = faiss.read_index(INDEX_FILE)
+		elapsed_ms = (time.perf_counter() - start) * 1000
+		logger.info("FAISS索引加载成功: file=%s, elapsed_ms=%.2f", INDEX_FILE, elapsed_ms)
 		print(f"加载 FAISS 索引: {INDEX_FILE}")
 	except Exception as e:
+		logger.exception("加载FAISS索引失败")
 		print(f"加载索引失败: {e}")
 		return None, None, None
 	
 	# 加载块信息
 	try:
+		start = time.perf_counter()
 		with open(CHUNKS_FILE, "rb") as f:
 			data = pickle.load(f)
 			chunk_texts = data["texts"]
 			chunk_sources = data["sources"]
+		elapsed_ms = (time.perf_counter() - start) * 1000
+		logger.info("块信息加载成功: file=%s, chunks=%d, elapsed_ms=%.2f", CHUNKS_FILE, len(chunk_texts), elapsed_ms)
 		print(f"加载块信息: {CHUNKS_FILE}")
 		print(f"块数: {len(chunk_texts)}")
 	except Exception as e:
+		logger.exception("加载块信息失败")
 		print(f"加载块信息失败: {e}")
 		return None, None, None
 	
@@ -74,15 +90,23 @@ def load_index_and_chunks():
 
 
 def main():
+	run_id = str(uuid.uuid4())[:8]
+	logger.info("RAG会话启动: run_id=%s, llm_provider=%s", run_id, LLM_PROVIDER)
+	total_start = time.perf_counter()
+
 	# 1) 加载向量模型
 	print("加载向量模型...")
 	try:
 		# 自动选择设备：优先 GPU，降级到 CPU
+		start = time.perf_counter()
 		device = "cuda" if torch.cuda.is_available() else "cpu"
 		print(f"设备: {device}")
 		model = SentenceTransformer(VECTOR_INDEX_MODEL_NAME, device=device)
+		elapsed_ms = (time.perf_counter() - start) * 1000
+		logger.info("向量模型加载成功: run_id=%s, model=%s, device=%s, elapsed_ms=%.2f", run_id, VECTOR_INDEX_MODEL_NAME, device, elapsed_ms)
 		print(f"模型加载成功\n")
 	except Exception as e:
+		logger.exception("向量模型加载失败: run_id=%s", run_id)
 		print(f"模型加载失败: {e}")
 		return
 	
@@ -96,9 +120,14 @@ def main():
 	# Qwen 模型预加载（如果配置使用 Qwen）
 	if LLM_PROVIDER == "qwen_local":
 		print("预加载本地 Qwen 模型...")
+		start = time.perf_counter()
 		preload_ok = preload_qwen_model()
+		elapsed_ms = (time.perf_counter() - start) * 1000 
 		if not preload_ok:
+			logger.warning("Qwen预加载失败: run_id=%s, elapsed_ms=%.2f", run_id, elapsed_ms)
 			print("警告: Qwen 预加载失败，首次问答可能会变慢。")
+		else:
+			logger.info("Qwen预加载成功: run_id=%s, elapsed_ms=%.2f", run_id, elapsed_ms)
 		print()
 	
 	# ====== 3) 交互式查询 ======
@@ -124,13 +153,19 @@ def main():
 		print("=" * 50)
 		query = input("> ").strip()
 		if not query:
+			logger.info("用户结束会话: run_id=%s, finished_queries=%d", run_id, counter)
 			print("程序结束。")
 			break
 
 		counter += 1
+		query_id = f"{run_id}-{counter}"
+		query_preview = query[:LOG_QUERY_PREVIEW_CHARS]
+		logger.info("收到查询: query_id=%s, len=%d, preview=%s", query_id, len(query), query_preview)
+		query_start = time.perf_counter()
 
 		# 执行混合检索 + rerank（支持 Query 拆分）
 		try:
+			retrieve_start = time.perf_counter()
 			results = hybrid_retrieve_with_query_split(
 				query=query,
 				model=model,
@@ -146,11 +181,15 @@ def main():
 				faiss_weight=FAISS_SCORE_WEIGHT,
 				bm25_weight=BM25_SCORE_WEIGHT,
 			)
+			retrieve_elapsed_ms = (time.perf_counter() - retrieve_start) * 1000
+			logger.info("检索完成: query_id=%s, results=%d, elapsed_ms=%.2f", query_id, len(results), retrieve_elapsed_ms)
 		except Exception as e:
+			logger.exception("检索失败: query_id=%s", query_id)
 			print(f"检索失败: {e}")
 			continue
 
 		if not results:
+			logger.warning("无检索结果: query_id=%s", query_id)
 			print("未检索到可用结果。")
 			continue
 		
@@ -184,12 +223,19 @@ def main():
 
 		# ======== 按配置调用 LLM 并输出回答 ========
 		if LLM_PROVIDER == "deepseek":
+			llm_start = time.perf_counter()
 			answer = generate_with_deepseek(query, top_contexts)
+			llm_elapsed_ms = (time.perf_counter() - llm_start) * 1000
+			logger.info("LLM生成完成: query_id=%s, provider=deepseek, answer_ok=%s, elapsed_ms=%.2f", query_id, bool(answer), llm_elapsed_ms)
 			answer_model_name = LLM_MODEL_NAME
 		elif LLM_PROVIDER == "qwen_local":
+			llm_start = time.perf_counter()
 			answer = generate_with_qwen(query, top_contexts)
+			llm_elapsed_ms = (time.perf_counter() - llm_start) * 1000
+			logger.info("LLM生成完成: query_id=%s, provider=qwen_local, answer_ok=%s, elapsed_ms=%.2f", query_id, bool(answer), llm_elapsed_ms)
 			answer_model_name = QWEN_MODEL_NAME
 		else:
+			logger.error("不支持的LLM_PROVIDER: query_id=%s, provider=%s", query_id, LLM_PROVIDER)
 			print(f"不支持的 LLM_PROVIDER: {LLM_PROVIDER}")
 			print("请在 config.py 中将 LLM_PROVIDER 设置为 deepseek 或 qwen_local")
 			answer = None
@@ -200,9 +246,17 @@ def main():
 			print(f"回答来自: {answer_model_name}")
 			print("=" * 50)
 			print(f"> {answer}")
+		else:
+			logger.warning("LLM未返回有效回答: query_id=%s", query_id)
+
+		query_elapsed_ms = (time.perf_counter() - query_start) * 1000
+		logger.info("查询完成: query_id=%s, elapsed_ms=%.2f", query_id, query_elapsed_ms)
 		
 		print("\n" + "-" * 100 + "\n")# 分隔符，清晰区分每次查询
 		# 继续下一轮查询
+
+	total_elapsed_ms = (time.perf_counter() - total_start) * 1000
+	logger.info("RAG会话结束: run_id=%s, total_elapsed_ms=%.2f", run_id, total_elapsed_ms)
 
 
 if __name__ == "__main__":

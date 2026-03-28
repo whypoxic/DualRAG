@@ -4,6 +4,7 @@ Qwen_API.py
 """
 
 from typing import List, Optional
+import time
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -17,6 +18,10 @@ from config import (
 )
 # 从 prompt_template 导入系统提示和用户提示构建函数
 from prompt_template import SYSTEM_PROMPT, build_user_prompt
+from logger_setup import get_logger
+
+
+logger = get_logger("llm.qwen", "llm.log")
 
 
 _tokenizer = None
@@ -29,10 +34,13 @@ def preload_qwen_model() -> bool:
     启动阶段提前加载本地 Qwen 模型，减少首问延迟。
     """
     try:
+        start = time.perf_counter()
         _load_model_if_needed(QWEN_LOCAL_PATH)
+        logger.info("Qwen预加载成功: model_path=%s, elapsed_ms=%.2f", QWEN_LOCAL_PATH, (time.perf_counter() - start) * 1000)
         print(f"Qwen 模型已预加载: {QWEN_LOCAL_PATH}")
         return True
     except Exception as e:
+        logger.exception("Qwen预加载失败")
         print(f"Qwen 预加载失败: {e}")
         return False
 
@@ -41,11 +49,13 @@ def _load_model_if_needed(model_path: str):
     global _tokenizer, _model, _model_path
 
     if _model is not None and _tokenizer is not None and _model_path == model_path:
+        logger.debug("Qwen模型已缓存: model_path=%s", model_path)
         return _tokenizer, _model
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
 
+    load_start = time.perf_counter()
     _tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     if device == "cuda":
@@ -65,6 +75,7 @@ def _load_model_if_needed(model_path: str):
 
     _model.eval()
     _model_path = model_path
+    logger.info("Qwen模型加载完成: model_path=%s, device=%s, elapsed_ms=%.2f", model_path, device, (time.perf_counter() - load_start) * 1000)
 
     return _tokenizer, _model
 
@@ -74,6 +85,8 @@ def generate_with_qwen(query: str, contexts: List[str]) -> Optional[str]:
     使用本地 Qwen 模型生成回答。
     """
     try:
+        start = time.perf_counter()
+        logger.info("开始Qwen生成: query_len=%d, contexts=%d", len(query), len(contexts))
         tokenizer, model = _load_model_if_needed(QWEN_LOCAL_PATH)
 
         user_prompt = build_user_prompt(query=query, contexts=contexts)
@@ -112,9 +125,11 @@ def generate_with_qwen(query: str, contexts: List[str]) -> Optional[str]:
         prompt_len = inputs["input_ids"].shape[1]
         generated_ids = output_ids[0][prompt_len:]
         answer = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        logger.info("Qwen生成完成: answer_ok=%s, elapsed_ms=%.2f", bool(answer), (time.perf_counter() - start) * 1000)
 
         return answer if answer else None
 
     except Exception as e:
+        logger.exception("Qwen本地模型调用失败")
         print(f"\nQwen 本地模型调用失败: {e}")
         return None
